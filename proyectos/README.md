@@ -25,7 +25,7 @@ Ejemplos de referencia: [Google Drive](https://drive.google.com/drive/u/0/folder
 
 El proyecto grupal final es la actividad de cierre del curso de Codigo y Programacion del Samsung Innovation Campus Chile 2026.
 
-Cada equipo elige un dataset de datos reales, formula una pregunta de analisis concreta, construye un dashboard interactivo con Streamlit y presenta sus hallazgos en 7 minutos el 24 de junio.
+Cada equipo elige un dataset de datos reales, formula una pregunta de analisis concreta, construye un dashboard interactivo con Streamlit o Gradio y presenta sus hallazgos en 7 minutos el 24 de junio.
 
 **El objetivo no es mostrar que saben usar todas las herramientas del curso. Es demostrar que pueden usar las herramientas correctas para responder una pregunta con datos y comunicar el resultado a una audiencia no tecnica.**
 
