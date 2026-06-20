@@ -121,6 +121,7 @@ ip = min(max(ip, 0), 100)
 
 # Ecuaciones educativas de velocidad y rango geodésico
 velocidad_fuego = 0.5 + ((ip / 100) * 4.0) + ((viento / 100) * 3.0)
+# CORRECCIÓN DE BUG: Se cambió 'hours_ev' por 'horas_ev' para concordar con la variable asignada al widget de Streamlit
 alcance_km = velocidad_fuego * horas_ev
 
 origen_fila = df_comunas[df_comunas['comuna'] == comuna_origen].iloc[0]
