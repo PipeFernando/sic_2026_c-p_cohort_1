@@ -36,7 +36,6 @@ albergues_biobio = {
 def inicializar_sistema():
     base_path = os.path.dirname(os.path.abspath(__file__))
     
-    # Intentamos buscar los archivos recorriendo las carpetas comunes del servidor
     archivo_comunas = "Latitud - Longitud Chile.csv"
     archivo_bosques = "bosques_chile_excel.csv"
     
@@ -64,10 +63,7 @@ def inicializar_sistema():
             df_b = pd.read_csv(r, sep=';')
             break
 
-    # Si por alguna razón la carga de archivos físicos falla, usamos un respaldo interno (FALLBACK)
-    # para que la aplicación NUNCA se quede en blanco ni muestre una pantalla roja de error
     if df_c is None:
-        # Generamos un DataFrame de emergencia con las comunas principales para que el mapa cargue sí o sí
         df_c = pd.DataFrame({
             'Comuna': ['Concepción', 'Los Ángeles', 'Talcahuano', 'Coronel', 'Hualpén', 'Chiguayante', 'San Pedro de la Paz', 'Penco', 'Tomé', 'Lota'],
             'Región': ['Biobío'] * 10,
@@ -78,7 +74,6 @@ def inicializar_sistema():
         })
 
     if df_b is None:
-        # Hectáreas oficiales fijas del Biobío si CONAF falla
         vegetacion = {
             "plantacion_forestal_ha": 875178.4,
             "bosque_nativo_ha": 597572.7,
@@ -101,7 +96,6 @@ def inicializar_sistema():
             "bosques_total_ha": limpiar_numero_chileno(row_biobio['Total'])
         }
 
-    # Limpieza estándar de datos geográficos para Plotly
     df_c['Región_Clean'] = df_c['Región'].astype(str).str.lower()
     df_comunas_biobio = df_c[df_c['Región_Clean'].str.contains('bio', na=False)].copy()
     
@@ -109,7 +103,6 @@ def inicializar_sistema():
     df_comunas_biobio['latitud_decimal'] = pd.to_numeric(df_comunas_biobio['Latitud (Decimal)'], errors='coerce')
     df_comunas_biobio['longitud_decimal'] = pd.to_numeric(df_comunas_biobio['Longitud (decimal)'], errors='coerce')
     
-    # Procesamiento de strings a enteros limpios
     df_comunas_biobio['poblacion_2017'] = df_comunas_biobio['Población Año 2017'].astype(str).str.replace(',', '').str.replace('.', '').astype(int)
     df_comunas_biobio = df_comunas_biobio.dropna(subset=['latitud_decimal', 'longitud_decimal'])
     
@@ -185,16 +178,19 @@ df_comunas['Probabilidad (%)'] = [round(r[0], 1) for r in resultados]
 df_comunas['Clasificacion_Riesgo'] = [r[1] for r in resultados]
 
 # ==============================================================================
-# 5. DISEÑO DE PESTAÑAS INTERACTIVAS (MÓDULOS UX)
+# 5. DISEÑO DE PESTAÑAS INTERACTIVAS (UX PROFESIONAL MODULADO)
 # ==============================================================================
 tab_mapa, tab_tabla, tab_datos, tab_contexto, tab_prevencion = st.tabs([
     "🖥️ Simulador y Mapa de Crisis", 
     "📊 Propagación Estimada entre Comunas", 
     "💾 Descargar Resultado (CSV)",
-    "🧪 Contexto y Tetraedro del Fuego",
-    "🌲 Medidas de Prevención"
+    "🧪 Contexto y Arquitectura Científica",
+    "🌲 Plan de Prevención e Interacción Comunitaria"
 ])
 
+# ------------------------------------------------------------------------------
+# PESTAÑA 1: MAPA Y CONTROLES OPERATIVOS
+# ------------------------------------------------------------------------------
 with tab_mapa:
     comunas_afectadas = df_comunas[df_comunas['Probabilidad (%)'] >= 25]
     poblacion_afectada = comunas_afectadas['poblacion_2017'].sum()
@@ -275,17 +271,87 @@ with tab_datos:
         mime="text/csv"
     )
 
+# ------------------------------------------------------------------------------
+# PESTAÑA 4: CONTEXTO CIENTÍFICO Y ARQUITECTURA (MEJORADA UX PROFESIONAL)
+# ------------------------------------------------------------------------------
 with tab_contexto:
-    st.subheader("📝 Fundamentación del Proyecto y Arquitectura Lógica")
-    st.markdown("Los incendios forestales constituyen una amenaza permanente en Chile. Este proyecto implementa un simulador educativo.")
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        st.markdown("### 🧪 El Tetraedro del Fuego en el Panel")
-        st.markdown("*Combustible, Calor, Oxígeno y Reacción en Cadena.*")
-    with col_c2:
-        st.markdown("### 🔬 Inspiración Científica (Rothermel 1972)")
-        st.markdown("El diseño simplifica la ecuación matemática de fluidos complejos del físico Richard Rothermel.")
+    st.subheader("📝 Fundamentación Estratégica y Arquitectura Lógica")
+    st.info("💡 **Objetivo Institucional:** Este MVP actúa como un Simulador Predictivo de Desastres diseñado para coordinar las mesas de las centrales del COE y SENAPRED ante crisis climáticas complejas en la Región del Biobío.")
+    
+    # Grid de 3 Columnas dinámicas que explican los componentes científicos
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("#### 🧪 Tetraedro del Fuego")
+        st.markdown("""
+        Los controladores emulan las 4 caras químicas necesarias para sostener la combustión forestal:
+        * **Combustible:** Carga vegetal obtenida de CONAF.
+        * **Calor:** Temperatura ambiente (°C).
+        * **Oxígeno:** Aporte cinético de ráfagas de viento.
+        * **Reacción en Cadena:** Sequedad crítica del aire.
+        """)
+    with c2:
+        st.markdown("#### 🔬 Modelo Rothermel (1972)")
+        st.markdown("""
+        Simplificación analítica de la física de fluidos. Traduce variables complejas como el contenido de humedad de extinción y la relación de empaquetamiento a una matriz lineal ponderada rápida de ejecutar en tiempo real.
+        """)
+    with c3:
+        st.markdown("#### 📊 Datos Censales (INE)")
+        st.markdown("""
+        Cruza los radios geométricos de alcance del fuego con los datos demográficos reales de la población de cada comuna (Censo 2017) para calcular los vectores de vulnerabilidad civil de manera inmediata.
+        """)
 
+    st.markdown("---")
+    st.markdown("### 🎛️ Simulador Químico del Impacto de Gases y Mitigación Co2")
+    st.write("Selecciona un nivel estimado de hectáreas destruidas para estimar el daño a la atmósfera:")
+    
+    # Elemento interactivo profesional dentro de Contexto
+    ha_quemadas = st.number_input("🔥 Estimación de Superficie Siniestrada (Hectáreas)", min_value=10, max_value=50000, value=1500)
+    co2_emitido = ha_quemadas * 18.5  # Constante ambiental estándar de emisión de carbono forestal
+    arboles_perdidos = ha_quemadas * 450
+    
+    res1, res2 = st.columns(2)
+    with res1: st.metric("⚠️ Emisión Estimada de CO₂ al Aire", f"{co2_emitido:,.1f} Toneladas")
+    with res2: st.metric("📉 Pérdida de Sumideros de Carbono (Árboles)", f"{arboles_perdidos:,.0f} ejemplares")
+
+# ------------------------------------------------------------------------------
+# PESTAÑA 5: MEDIDAS DE PREVENCIÓN (DISEÑO PROFESIONAL CON EXPANDERS E INTERACTIVIDAD)
+# ------------------------------------------------------------------------------
 with tab_prevencion:
-    st.subheader("🌲 Manual Comunitario: Medidas Preventivas")
-    st.write("Mantén cortafuegos limpios perimetrales de 10 metros, limpia canaletas y avisa de inmediato ante cualquier foco a CONAF (130).")
+    st.subheader("🌲 Plan Maestro Comunitario: Mitigación y Gestión Preventiva")
+    st.warning("⚠️ **Factor Antrópico:** El 99% de los incendios forestales en Chile son causados por negligencia o intención humana. La educación y la prevención son nuestras defensas más sólidas.")
+    
+    # Uso de st.expander para un diseño limpio y moderno
+    with st.expander("🏡 1. Protocolo de Autoprotección Residencial (Interfaz del Hogar)"):
+        st.markdown("""
+        * **Gestión del Entorno (Cortafuegos):** Mantener el pasto corto, seco y retirado a un mínimo de 10 metros de los cimientos de la casa.
+        * **Limpieza Estructural:** Despejar techumbres, canaletas y vigas de acumulación de ramas secas, agujas de pino u hojas secas inflamables.
+        * **Poda de Seguridad:** Cortar las ramas más bajas de los árboles cercanos hasta una altura de 2 metros para mitigar la continuidad vertical del fuego.
+        """)
+        
+    with st.expander("🚜 2. Operaciones Rurales, Forestales y Agrícolas"):
+        st.markdown("""
+        * **Cero Quemas:** Prohibición estricta del uso del fuego para eliminación de desechos agrícolas durante la temporada estival de altas temperaturas.
+        * **Faenas Seguras:** Suspender el uso de herramientas eléctricas que generen chispas (galleteras, soldadoras) en áreas rurales con presencia de pastizal seco.
+        * **Patrullaje Preventivo:** Habilitar redes comunitarias de monitoreo y vigías vecinales en zonas colindantes a plantaciones forestales masivas.
+        """)
+        
+    with st.expander("⛺ 3. Turismo Responsable y Uso del Territorio"):
+        st.markdown("""
+        * **Camping Consecuente:** No encender fogatas en áreas silvestres protegidas ni reservas naturales fuera de las zonas expresamente habilitadas.
+        * **Gestión de Residuos:** Retirar latas, botellas y vidrios de los senderos; actúan como lupas bajo el sol, iniciando focos térmicos espontáneos.
+        * **Líneas de Emergencia:** Mantener los números clave agendados: **CONAF (130)**, **Bomberos (132)**, y **Carabineros (133)**.
+        """)
+
+    st.markdown("---")
+    st.markdown("### 🧠 Test Rápido de Preparación Comunitaria frente a Emergencias")
+    st.write("Evalúa el nivel de preparación de tu localidad antes de la temporada de crisis:")
+    
+    # Encuesta interactiva interactiva que calcula un Score dinámico de prevención
+    q1 = st.checkbox("¿Tu hogar cuenta con un cortafuegos perimetral libre de maleza seca de al menos 10 metros?")
+    q2 = st.checkbox("¿Conoces la ubicación exacta del albergue asignado para tu comuna en el plan del COE?")
+    q3 = st.checkbox("¿Tienes un kit de emergencia familiar preparado (agua, linterna, radio a pilas, documentos)?")
+    
+    score = sum([q1, q2, q3])
+    if score == 3: st.success("🟢 **Excelente:** Tu entorno cumple con los estándares institucionales más altos de prevención forestal.")
+    elif score >= 1: st.warning("🟡 **Atención:** Cuentas con nociones básicas, pero quedan brechas vulnerables que cubrir antes de un siniestro.")
+    else: st.error("🔴 **Riesgo Crítico:** Tu comunidad se encuentra desprotegida. Te sugerimos revisar las guías de CONAF indicadas arriba.")
