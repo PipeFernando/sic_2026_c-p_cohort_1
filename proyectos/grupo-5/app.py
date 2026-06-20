@@ -16,7 +16,6 @@ st.set_page_config(
 st.title("🚨 Sistema Integrado de Alertas, Mitigación y Planes de Evacuación")
 st.markdown("### Centro de Operaciones de Emergencia (COE) | SIC 2026 - Grupo 5")
 
-# Diccionario operativo de albergues habilitados por comuna para la sección de logística
 albergues_biobio = {
     "Concepción": "Gimnasio Municipal (Av. Collao 525) - Abierto 24/7",
     "Los Ángeles": "Liceo Comercial (Ricardo Vicuña 310) - Zona de Resguardo",
@@ -31,75 +30,54 @@ albergues_biobio = {
 }
 
 # ==============================================================================
-# 2. CARGA INTELIGENTE DE DATOS (MÚLTIPLES RUTAS DE RESPALDO ANTI-ERRORS)
+# 2. CARGA INTELIGENTE DE DATOS CON PROTOCOLO ABSOLUTO (ESCALABLE PARA MÁS DATASETS)
 # ==============================================================================
 @st.cache_data
 def inicializar_sistema():
-    # DECISIÓN NO OBVIA DE ENRUTAMIENTO: Obtenemos el directorio base donde vive app.py
-    base_path = os.path.dirname(__file__)
+    # DECISIÓN NO OBVIA: os.path.abspath(__file__) localiza la ubicación real en el servidor.
+    # Desde ahí navegamos directo a la carpeta 'data/'. Esto soluciona los bloqueos de Linux.
+    directorio_script = os.path.dirname(os.path.abspath(__file__))
+    carpeta_data = os.path.join(directorio_script, "data")
     
-    # Definición de posibles variantes de rutas para el dataset de Comunas
-    posibles_rutas_comunas = [
-        os.path.join(base_path, "data", "Latitud - Longitud Chile.csv"),
-        os.path.join(base_path, "Latitud - Longitud Chile.csv"),
-        "Latitud - Longitud Chile.csv"
-    ]
+    # Construcción de rutas absolutas e inequívocas
+    ruta_comunas = os.path.join(carpeta_data, "Latitud - Longitud Chile.csv")
+    ruta_bosques = os.path.join(carpeta_data, "bosques_chile_excel.csv")
     
-    # Definición de posibles variantes de rutas para el dataset de Bosques (CONAF)
-    posibles_rutas_bosques = [
-        os.path.join(base_path, "data", "bosques_chile_excel.csv"),
-        os.path.join(base_path, "bosques_chile_excel.csv"),
-        "bosques_chile_excel.csv"
-    ]
-    
-    # Bucle buscador dinámico para Comunas
-    df_c = None
-    for ruta in posibles_rutas_comunas:
-        if os.path.exists(ruta):
-            df_c = pd.read_csv(ruta)
-            break
-            
-    # Bucle buscador dinámico para Bosques
-    df_b = None
-    for ruta in posibles_rutas_bosques:
-        if os.path.exists(ruta):
-            df_b = pd.read_csv(ruta, sep=';')
-            break
+    # Verificación estricta de existencia en el servidor antes de la lectura
+    if not os.path.exists(ruta_comunas):
+        raise FileNotFoundError(f"Falta el archivo base de comunas en la ruta: {ruta_comunas}")
+    if not os.path.exists(ruta_bosques):
+        raise FileNotFoundError(f"Falta el archivo de vegetación en la ruta: {ruta_bosques}")
+        
+    # Lectura e indexación de los DataFrames
+    df_c = pd.read_csv(ruta_comunas)
+    df_b = pd.read_csv(ruta_bosques, sep=';')
 
-    # Si la búsqueda interactiva en capas falla, lanzamos una excepción clara
-    if df_c is None or df_b is None:
-        faltantes = []
-        if df_c is None: faltantes.append("Latitud - Longitud Chile.csv")
-        if df_b is None: faltantes.append("bosques_chile_excel.csv")
-        raise FileNotFoundError(f"No se encontraron los siguientes archivos en ninguna ruta del servidor: {', '.join(faltantes)}")
+    # ==========================================================================
+    # ➕ NOTA TÉCNICA: Si agregas más datasets en el futuro a la carpeta 'data/',
+    # solo debes replicar estas dos líneas por cada archivo nuevo:
+    # ruta_nuevo = os.path.join(carpeta_data, "tu_nuevo_archivo.csv")
+    # df_nuevo = pd.read_csv(ruta_nuevo)
+    # ==========================================================================
 
-    # DECISIÓN NO OBVIA DE FILTRADO: El string 'Biobío' en el dataset original posee un carácter
-    # invisible de espacio de no separación (\xa0). El uso de .str.contains() previene que el filtrado 
-    # devuelva un dataframe vacío por discordancia de codificación UTF-8.
+    # Formateo y limpieza del set demográfico por codificación (\xa0Biobío)
     df_c = df_c[df_c['Región'].astype(str).str.contains('Biobío')]
-    
     df_c['comuna'] = df_c['Comuna'].str.strip()
     df_c['latitud_decimal'] = df_c['Latitud (Decimal)']
     df_c['longitud_decimal'] = df_c['Longitud (decimal)']
-    
-    # DECISIÓN NO OBVIA DE LIMPIEZA NUMÉRICA: Reemplazamos tanto comas como puntos en un string
-    # antes de transformar a entero. Esto evita caídas del backend debidas a formatos inconsistentes 
-    # de separadores de miles en el volcado original de Excel.
     df_c['poblacion_2017'] = df_c['Población Año 2017'].astype(str).str.replace(',', '').str.replace('.', '').astype(float).astype(int)
     
     df_b['Región'] = df_b['Región'].str.strip()
-    
     def limpiar_numero_chileno(val):
         if pd.isna(val): return 0.0
         return float(str(val).strip().replace('.', '').replace(',', '.'))
     
     row_biobio = df_b[df_b['Región'] == 'Biobío'].iloc[0]
-    
     vegetacion = {
         "plantacion_forestal_ha": limpiar_numero_chileno(row_biobio['Plantación Forestal']),
         "bosque_nativo_ha": limpiar_numero_chileno(row_biobio['Bosque Nativo']),
         "bosque_mixto_ha": limpiar_numero_chileno(row_biobio['Bosque Mixto']),
-        "humedales_ha": 10172.8, # Constante ecológica regional validada según informe de humedales
+        "humedales_ha": 10172.8,
         "bosques_total_ha": limpiar_numero_chileno(row_biobio['Total'])
     }
     
@@ -108,8 +86,8 @@ def inicializar_sistema():
 try:
     df_comunas, datos_biobio = inicializar_sistema()
 except Exception as e:
-    st.error(f"❌ Error crítico en el enrutamiento de archivos locales: {e}")
-    st.info("Por favor, asegúrate de que los archivos CSV estén guardados en la carpeta correcta en GitHub y realiza un 'Reboot App' en Streamlit Cloud.")
+    st.error(f"❌ Error de enrutamiento en Streamlit Cloud: {e}")
+    st.info("Comprueba que los nombres de los archivos en GitHub tengan las mismas mayúsculas, minúsculas y espacios.")
     st.stop()
 
 # ==============================================================================
@@ -131,7 +109,6 @@ horas_ev = st.sidebar.slider("⏳ Ventana de Simulación (Horas)", 1, 12, 4)
 # ==============================================================================
 # 4. ALGORITMO MATEMÁTICO DE PROPAGACIÓN
 # ==============================================================================
-# DECISIÓN NO OBVIA: Ponderación de inflamabilidad basada en el Modelo de Rothermel (1972).
 combustible = (
     (datos_biobio["plantacion_forestal_ha"] * 1.0) +
     (datos_biobio["bosque_mixto_ha"] * 0.8) +
@@ -139,24 +116,19 @@ combustible = (
 ) / datos_biobio["bosques_total_ha"] * 100
 
 sequedad = 100 - humedad
-
-# Matriz predictiva sustituta lineal para el Índice de Propagación (IP)
 ip = (0.30 * viento) + (0.30 * combustible) + (0.20 * temperatura) + (0.10 * sequedad) + (0.10 * pendiente)
 ip = min(max(ip, 0), 100)
 
-# Ecuaciones educativas de velocidad y rango geodésico
 velocidad_fuego = 0.5 + ((ip / 100) * 4.0) + ((viento / 100) * 3.0)
 alcance_km = velocidad_fuego * horas_ev
 
 origen_fila = df_comunas[df_comunas['comuna'] == comuna_origen].iloc[0]
 lat_o, lon_o = origen_fila['latitud_decimal'], origen_fila['longitud_decimal']
 
-# DECISIÓN NO OBVIA DE GEOMETRÍA: Uso de aproximación esférica euclidiana multiplicada por 111.12.
 df_comunas['distancia_foco_km'] = np.sqrt((df_comunas['latitud_decimal'] - lat_o)**2 + (df_comunas['longitud_decimal'] - lon_o)**2) * 111.12
 df_comunas['dif_lat'] = df_comunas['latitud_decimal'] - lat_o
 df_comunas['dif_lon'] = df_comunas['longitud_decimal'] - lon_o
 
-# DECISIÓN NO OBVIA DE TRAYECTORIA: El viento se modela vectorialmente en un plano cartesiano simple.
 def evaluar_trayectoria(row):
     if row['comuna'] == comuna_origen: return True
     if dir_viento == "Norte" and row['dif_lat'] > 0: return True
@@ -171,13 +143,11 @@ df_comunas['En_Trayectoria'] = df_comunas.apply(evaluar_trayectoria, axis=1)
 def calcular_probabilidad_y_rango(row):
     if row['comuna'] == comuna_origen:
         return 100.0, "🔴 Extremo (Foco)"
-    
     if row['distancia_foco_km'] <= alcance_km and row['En_Trayectoria']:
         prob = 100 - ((row['distancia_foco_km'] / alcance_km) * 100)
         prob = min(max(prob, 0), 100)
     else:
         prob = 0.0
-
     if prob >= 75: return float(prob), "🔴 Extremo"
     elif prob >= 50: return float(prob), "🟠 Alto"
     elif prob >= 25: return float(prob), "🟡 Medio"
@@ -198,9 +168,6 @@ tab_mapa, tab_tabla, tab_datos, tab_contexto, tab_prevencion = st.tabs([
     "🌲 Medidas de Prevención"
 ])
 
-# ------------------------------------------------------------------------------
-# PESTAÑA 1: MAPA Y CONTROLES OPERATIVOS
-# ------------------------------------------------------------------------------
 with tab_mapa:
     comunas_afectadas = df_comunas[df_comunas['Probabilidad (%)'] >= 25]
     poblacion_afectada = comunas_afectadas['poblacion_2017'].sum()
@@ -265,18 +232,12 @@ with tab_mapa:
         df_telefonos = pd.DataFrame({"Organismo": ["CONAF", "Bomberos", "SAMU", "Carabineros"], "Línea": ["130", "132", "131", "133"]})
         st.table(df_telefonos)
 
-# ------------------------------------------------------------------------------
-# PESTAÑA 2: TABLA DE DATOS DE PROPAGACIÓN COMPARATIVA
-# ------------------------------------------------------------------------------
 with tab_tabla:
     st.subheader("📊 Tabla Comparativa de Impacto Territorial")
     df_tabla_limpia = df_comunas[['comuna', 'Provincia', 'poblacion_2017', 'distancia_foco_km', 'Probabilidad (%)', 'Clasificacion_Riesgo']].sort_values(by='Probabilidad (%)', ascending=False)
     df_tabla_limpia.columns = ['Comuna', 'Provincia', 'Población (Censo)', 'Distancia al Foco (Km)', 'Probabilidad de Impacto', 'Nivel de Riesgo']
     st.dataframe(df_tabla_limpia, use_container_width=True, hide_index=True)
 
-# ------------------------------------------------------------------------------
-# PESTAÑA 3: DESCARGA DE RESULTADOS
-# ------------------------------------------------------------------------------
 with tab_datos:
     st.subheader("💾 Exportación de Reportes Técnicos para Autoridades")
     csv_data = df_tabla_limpia.to_csv(index=False, sep=';').encode('utf-8-sig')
@@ -287,9 +248,6 @@ with tab_datos:
         mime="text/csv"
     )
 
-# ------------------------------------------------------------------------------
-# PESTAÑA 4: CONTEXTO CIENTÍFICO Y TETRAEDRO
-# ------------------------------------------------------------------------------
 with tab_contexto:
     st.subheader("📝 Fundamentación del Proyecto y Arquitectura Lógica")
     st.markdown("Los incendios forestales constituyen una amenaza permanente en Chile. Este proyecto implementa un simulador educativo.")
@@ -301,9 +259,6 @@ with tab_contexto:
         st.markdown("### 🔬 Inspiración Científica (Rothermel 1972)")
         st.markdown("El diseño simplifica la ecuación matemática de fluidos complejos del físico Richard Rothermel.")
 
-# ------------------------------------------------------------------------------
-# PESTAÑA 5: MEDIDAS DE PREVENCIÓN
-# ------------------------------------------------------------------------------
 with tab_prevencion:
-    st.subheader("🌲 Manual Comunitario: Medidas Preventivas para Evitar Incendios")
+    st.subheader("🌲 Manual Comunitario: Medidas Preventivas")
     st.write("Mantén cortafuegos limpios perimetrales de 10 metros, limpia canaletas y avisa de inmediato ante cualquier foco a CONAF (130).")
