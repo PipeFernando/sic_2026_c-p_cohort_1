@@ -16,7 +16,7 @@ st.set_page_config(
 st.title("🚨 Sistema Integrado de Alertas, Mitigación y Planes de Evacuación")
 st.markdown("### Centro de Operaciones de Emergencia (COE) | SIC 2026 - Grupo 5")
 
-# Diccionario de albergues habilitados por comuna para la sección de logística operativa
+# Diccionario operativo de albergues habilitados por comuna para la sección de logística
 albergues_biobio = {
     "Concepción": "Gimnasio Municipal (Av. Collao 525) - Abierto 24/7",
     "Los Ángeles": "Liceo Comercial (Ricardo Vicuña 310) - Zona de Resguardo",
@@ -31,20 +31,48 @@ albergues_biobio = {
 }
 
 # ==============================================================================
-# 2. CARGA Y LIMPIEZA DE DATOS AUTOMATIZADA (ENRUTAMIENTO ABSOLUTO)
+# 2. CARGA INTELIGENTE DE DATOS (MÚLTIPLES RUTAS DE RESPALDO ANTI-ERRORS)
 # ==============================================================================
 @st.cache_data
 def inicializar_sistema():
-    # DECISIÓN NO OBVIA DE ENRUTAMIENTO: Usamos os.path dinámico basado en __file__.
-    # Esto asegura que sin importar si la app corre localmente o en los servidores
-    # de Streamlit Cloud, el sistema siempre encuentre la subcarpeta 'data/' relativa al script.
+    # DECISIÓN NO OBVIA DE ENRUTAMIENTO: Obtenemos el directorio base donde vive app.py
     base_path = os.path.dirname(__file__)
     
-    ruta_comunas = os.path.join(base_path, "data", "Latitud - Longitud Chile.csv")
-    ruta_bosques = os.path.join(base_path, "data", "bosques_chile_excel.csv")
+    # Definición de posibles variantes de rutas para el dataset de Comunas
+    posibles_rutas_comunas = [
+        os.path.join(base_path, "data", "Latitud - Longitud Chile.csv"),
+        os.path.join(base_path, "Latitud - Longitud Chile.csv"),
+        "Latitud - Longitud Chile.csv"
+    ]
     
-    df_c = pd.read_csv(ruta_comunas)
+    # Definición de posibles variantes de rutas para el dataset de Bosques (CONAF)
+    posibles_rutas_bosques = [
+        os.path.join(base_path, "data", "bosques_chile_excel.csv"),
+        os.path.join(base_path, "bosques_chile_excel.csv"),
+        "bosques_chile_excel.csv"
+    ]
     
+    # Bucle buscador dinámico para Comunas
+    df_c = None
+    for ruta in posibles_rutas_comunas:
+        if os.path.exists(ruta):
+            df_c = pd.read_csv(ruta)
+            break
+            
+    # Bucle buscador dinámico para Bosques
+    df_b = None
+    for ruta in posibles_rutas_bosques:
+        if os.path.exists(ruta):
+            df_b = pd.read_csv(ruta, sep=';')
+            break
+
+    # Si la búsqueda interactiva en capas falla, lanzamos una excepción clara
+    if df_c is None or df_b is None:
+        faltantes = []
+        if df_c is None: faltantes.append("Latitud - Longitud Chile.csv")
+        if df_b is None: faltantes.append("bosques_chile_excel.csv")
+        raise FileNotFoundError(f"No se encontraron los siguientes archivos en ninguna ruta del servidor: {', '.join(faltantes)}")
+
     # DECISIÓN NO OBVIA DE FILTRADO: El string 'Biobío' en el dataset original posee un carácter
     # invisible de espacio de no separación (\xa0). El uso de .str.contains() previene que el filtrado 
     # devuelva un dataframe vacío por discordancia de codificación UTF-8.
@@ -59,7 +87,6 @@ def inicializar_sistema():
     # de separadores de miles en el volcado original de Excel.
     df_c['poblacion_2017'] = df_c['Población Año 2017'].astype(str).str.replace(',', '').str.replace('.', '').astype(float).astype(int)
     
-    df_b = pd.read_csv(ruta_bosques, sep=';')
     df_b['Región'] = df_b['Región'].str.strip()
     
     def limpiar_numero_chileno(val):
@@ -82,7 +109,7 @@ try:
     df_comunas, datos_biobio = inicializar_sistema()
 except Exception as e:
     st.error(f"❌ Error crítico en el enrutamiento de archivos locales: {e}")
-    st.info("Asegúrese de que el dataset se ubique exactamente en la subcarpeta 'data/'")
+    st.info("Por favor, asegúrate de que los archivos CSV estén guardados en la carpeta correcta en GitHub y realiza un 'Reboot App' en Streamlit Cloud.")
     st.stop()
 
 # ==============================================================================
@@ -105,8 +132,6 @@ horas_ev = st.sidebar.slider("⏳ Ventana de Simulación (Horas)", 1, 12, 4)
 # 4. ALGORITMO MATEMÁTICO DE PROPAGACIÓN
 # ==============================================================================
 # DECISIÓN NO OBVIA: Ponderación de inflamabilidad basada en el Modelo de Rothermel (1972).
-# Se asigna peso máximo (1.0) a plantaciones artificiales por su alta continuidad de canopia,
-# reduciendo gradualmente en bosque mixto (0.8) y nativo (0.6) por mayor retención foliar de humedad.
 combustible = (
     (datos_biobio["plantacion_forestal_ha"] * 1.0) +
     (datos_biobio["bosque_mixto_ha"] * 0.8) +
@@ -121,22 +146,17 @@ ip = min(max(ip, 0), 100)
 
 # Ecuaciones educativas de velocidad y rango geodésico
 velocidad_fuego = 0.5 + ((ip / 100) * 4.0) + ((viento / 100) * 3.0)
-# CORRECCIÓN DE BUG: Se cambió 'hours_ev' por 'horas_ev' para concordar con la variable asignada al widget de Streamlit
 alcance_km = velocidad_fuego * horas_ev
 
 origen_fila = df_comunas[df_comunas['comuna'] == comuna_origen].iloc[0]
 lat_o, lon_o = origen_fila['latitud_decimal'], origen_fila['longitud_decimal']
 
 # DECISIÓN NO OBVIA DE GEOMETRÍA: Uso de aproximación esférica euclidiana multiplicada por 111.12.
-# Este factor transforma directamente la diferencia de grados sexagesimales de latitud/longitud
-# a kilómetros lineales terrestres, optimizando drásticamente el coste de procesamiento en bucles de pandas.
 df_comunas['distancia_foco_km'] = np.sqrt((df_comunas['latitud_decimal'] - lat_o)**2 + (df_comunas['longitud_decimal'] - lon_o)**2) * 111.12
 df_comunas['dif_lat'] = df_comunas['latitud_decimal'] - lat_o
 df_comunas['dif_lon'] = df_comunas['longitud_decimal'] - lon_o
 
 # DECISIÓN NO OBVIA DE TRAYECTORIA: El viento se modela vectorialmente en un plano cartesiano simple.
-# Si el viento sopla hacia el 'Norte', significa que empuja las llamas hacia arriba en el mapa, 
-# por ende, solo se verán afectadas las comunas cuya diferencia de latitud relativa sea positiva (dif_lat > 0).
 def evaluar_trayectoria(row):
     if row['comuna'] == comuna_origen: return True
     if dir_viento == "Norte" and row['dif_lat'] > 0: return True
@@ -184,9 +204,6 @@ tab_mapa, tab_tabla, tab_datos, tab_contexto, tab_prevencion = st.tabs([
 with tab_mapa:
     comunas_afectadas = df_comunas[df_comunas['Probabilidad (%)'] >= 25]
     poblacion_afectada = comunas_afectadas['poblacion_2017'].sum()
-    
-    # DECISIÓN NO OBVIA: Constante demográfica habitacional. Se divide por 3.2 basándose
-    # en la densidad habitacional promedio nacional por hogar registrada por el INE (Chile).
     viviendas_afectadas = poblacion_afectada / 3.2
 
     m1, m2, m3, m4 = st.columns(4)
@@ -253,21 +270,15 @@ with tab_mapa:
 # ------------------------------------------------------------------------------
 with tab_tabla:
     st.subheader("📊 Tabla Comparativa de Impacto Territorial")
-    st.write("A continuación se detallan las métricas procesadas de distancia y probabilidad para las comunas analizadas:")
-    
     df_tabla_limpia = df_comunas[['comuna', 'Provincia', 'poblacion_2017', 'distancia_foco_km', 'Probabilidad (%)', 'Clasificacion_Riesgo']].sort_values(by='Probabilidad (%)', ascending=False)
     df_tabla_limpia.columns = ['Comuna', 'Provincia', 'Población (Censo)', 'Distancia al Foco (Km)', 'Probabilidad de Impacto', 'Nivel de Riesgo']
     st.dataframe(df_tabla_limpia, use_container_width=True, hide_index=True)
 
 # ------------------------------------------------------------------------------
-# PESTAÑA 3: DESCARGA DE RESULTADOS (CORREGIDA PARA INTEGRACIÓN CON EXCEL CHILE)
+# PESTAÑA 3: DESCARGA DE RESULTADOS
 # ------------------------------------------------------------------------------
 with tab_datos:
     st.subheader("💾 Exportación de Reportes Técnicos para Autoridades")
-    st.write("Puedes descargar el estado actual de la simulación en un archivo perfectamente compatible con Excel:")
-    
-    # DECISIÓN NO OBVIA DE EXPORTACIÓN: El parámetro sep=';' combinado con encoding='utf-8-sig' fuerza a Excel
-    # a mapear de manera automática la delimitación estructural de celdas en sistemas locales sin requerir parseos manuales.
     csv_data = df_tabla_limpia.to_csv(index=False, sep=';').encode('utf-8-sig')
     st.download_button(
         label="📥 Descargar resultado en formato CSV para Excel",
@@ -281,45 +292,18 @@ with tab_datos:
 # ------------------------------------------------------------------------------
 with tab_contexto:
     st.subheader("📝 Fundamentación del Proyecto y Arquitectura Lógica")
-    st.markdown("""
-    Los incendios forestales constituyen una amenaza permanente en Chile. Este proyecto implementa un **Simulador Técnico de Gestión de Emergencias** como un Producto Mínimo Viable (MVP). Su objetivo es representar de forma lógica cómo ciertas condiciones ambientales y territoriales aumentan o disminuyen el riesgo de propagación entre comunas de la **Región del Biobío**.
-    """)
-    
+    st.markdown("Los incendios forestales constituyen una amenaza permanente en Chile. Este proyecto implementa un simulador educativo.")
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         st.markdown("### 🧪 El Tetraedro del Fuego en el Panel")
-        st.markdown("""
-        Los controles dinámicos de la barra lateral emulan químicamente las caras del **Tetraedro del Fuego**:
-        * **Combustible:** Determinado por el inventario regional de plantaciones densas.
-        * **Calor:** Modulado por la variable de *Temperatura Ambiente*.
-        * **Oxígeno:** Alimentado cinéticamente por la *Velocidad del Viento*.
-        * **Reacción en Cadena:** Determinada por el índice crítico de *Sequedad (100 - Humedad)*.
-        """)
+        st.markdown("*Combustible, Calor, Oxígeno y Reacción en Cadena.*")
     with col_c2:
         st.markdown("### 🔬 Inspiración Científica (Rothermel 1972)")
-        st.markdown("""
-        El diseño simplifica la ecuación matemática de fluidos complejos del físico **Richard Rothermel**, reduciendo variables de laboratorio complejas (como la carga molecular o densidad de empaquetamiento) a un sistema optimizado de pesos ponderados lineales para garantizar una ejecución interactiva fluida.
-        """)
+        st.markdown("El diseño simplifica la ecuación matemática de fluidos complejos del físico Richard Rothermel.")
 
 # ------------------------------------------------------------------------------
-# PESTAÑA 5: MEDIDAS DE PREVENCIÓN DE INCENDIOS
+# PESTAÑA 5: MEDIDAS DE PREVENCIÓN
 # ------------------------------------------------------------------------------
 with tab_prevencion:
     st.subheader("🌲 Manual Comunitario: Medidas Preventivas para Evitar Incendios")
-    st.write("El 99% de los incendios forestales son causados por acción humana. Conocer estas medidas puede salvar vidas:")
-    
-    p1, p2 = st.columns(2)
-    with p1:
-        st.markdown("""
-        #### 🏡 Alrededor del Hogar (Espacio Autoprotegido)
-        * **Manejo del Combustible:** Limpia techos y canaletas de hojas secas o ramas muertas que puedan encenderse con pavesas flotantes.
-        * **Cortafuegos Perimetral:** Mantenga el pasto corto y elimine la maleza seca en un radio mínimo de 10 metros alrededor de las viviendas.
-        * **Distanciamiento de Copas:** Pode los árboles del patio eliminando ramas bajas hasta los 2 metros de altura para evitar incendios de copa.
-        """)
-    with p2:
-        st.markdown("""
-        #### 🚜 En Actividades Rurales y de Camping
-        * **Restricción de Quemas:** Está prohibido realizar quemas de desechos agrícolas o forestales durante toda la época de altas temperaturas.
-        * **Uso del Fuego en Recreación:** No realices fogatas ni uses herramientas que generen chispas (como galleteras o soldadoras) cerca de vegetación seca.
-        * **Denuncia Inmediata:** Si detectas una columna de humo sospechosa por pequeña que sea, avisa de inmediato a **CONAF (130)** o **Bomberos (132)**.
-        """)
+    st.write("Mantén cortafuegos limpios perimetrales de 10 metros, limpia canaletas y avisa de inmediato ante cualquier foco a CONAF (130).")
