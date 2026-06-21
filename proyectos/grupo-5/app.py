@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 import os
+from utm_grid import generar_trazas_cuadricula_utm
 
 # ==============================================================================
 # 1. CONFIGURACIÓN DE LA INTERFAZ
@@ -127,7 +129,15 @@ df_comunas, datos_biobio = inicializar_sistema()
 # 3. PANEL LATERAL: CONTROLES DE CRISIS
 # ==============================================================================
 st.sidebar.header("🕹️ Panel de Control del Incidente")
-comuna_origen = st.sidebar.selectbox("📍 Comuna del Foco Inicial", sorted(df_comunas['comuna'].unique()))
+comunas_origen = st.sidebar.multiselect(
+    "📍 Comuna(s) del Foco Inicial",
+    sorted(df_comunas['comuna'].unique()),
+    default=[sorted(df_comunas['comuna'].unique())[0]],
+    help="Puedes seleccionar más de una comuna para simular múltiples incendios activos simultáneamente"
+)
+if not comunas_origen:
+    st.sidebar.warning("⚠️ Selecciona al menos un foco para correr la simulación.")
+    st.stop()
 
 st.sidebar.markdown("---")
 st.sidebar.header("🧭 Variables Atmosféricas")
@@ -138,6 +148,15 @@ temperatura = st.sidebar.slider("🌡️ Temperatura Ambiente (°C)", 10, 45, 34
 humedad = st.sidebar.slider("💧 Humedad Relativa (%)", 0, 100, 18)
 pendiente = st.sidebar.slider("⛰️ Pendiente media del Terreno (%)", 0, 100, 12)
 horas_ev = st.sidebar.slider("⏳ Ventana de Simulación (Horas)", 1, 72, 4)
+
+st.sidebar.markdown("---")
+st.sidebar.header("🗺️ Cuadrícula UTM")
+mostrar_grilla_utm = st.sidebar.checkbox("Mostrar cuadrícula UTM", value=True)
+paso_grilla_km = st.sidebar.slider("📏 Espaciado de la cuadrícula (km)", 1, 25, 5)
+mostrar_etiquetas_utm = st.sidebar.checkbox("Mostrar coordenadas UTM en la grilla", value=False,
+                                             help="Recomendado solo con espaciados de 10km o más, para evitar saturar el mapa")
+usar_distancia_foco = st.sidebar.checkbox("Etiquetar como distancia al foco (en vez de UTM)", value=False,
+                                           help="Cambia el texto de cada etiqueta de 'Este/Norte en km' a 'X km del foco'")
 
 # ==============================================================================
 # 4. ALGORITMO MATEMÁTICO DE PROPAGACIÓN (MOTOR REFACTORIZADO)
@@ -155,63 +174,83 @@ ip = min(max(ip, 0), 100)
 velocidad_fuego = 0.5 + ((ip / 100) * 4.0) + ((viento / 100) * 3.0)
 alcance_km = velocidad_fuego * horas_ev
 
-origen_fila = df_comunas[df_comunas['comuna'] == comuna_origen].iloc[0]
-lat_o, lon_o = origen_fila['latitud_decimal'], origen_fila['longitud_decimal']
+# Filas de origen para cada foco seleccionado (puede ser 1 o varias comunas)
+filas_origen = df_comunas[df_comunas['comuna'].isin(comunas_origen)]
+focos = [
+    {"comuna": r['comuna'], "lat": r['latitud_decimal'], "lon": r['longitud_decimal']}
+    for _, r in filas_origen.iterrows()
+]
 
-# Implementación de Haversine formal para Georreferenciación
+# Centro del mapa: promedio de todos los focos activos (si hay varios)
+lat_o = float(np.mean([f["lat"] for f in focos]))
+lon_o = float(np.mean([f["lon"] for f in focos]))
+
+# Distancia geodésica vía proyección UTM (más precisa que Haversine para esta escala regional)
+from utm_grid import distancia_utm_metros
+
 def haversine(lat1, lon1, lat2, lon2):
-    rad_earth = 6371.0
-    dlat = np.radians(lat2 - lat1)
-    dlon = np.radians(lon2 - lon1)
-    a = np.sin(dlat/2)**2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon/2)**2
-    return 2 * rad_earth * np.arcsin(np.sqrt(a))
+    return distancia_utm_metros(lat1, lon1, lat2, lon2) / 1000.0  # metros -> km
 
-df_comunas['distancia_foco_km'] = df_comunas.apply(lambda r: haversine(lat_o, lon_o, r['latitud_decimal'], r['longitud_decimal']), axis=1)
-df_comunas['dif_lat'] = df_comunas['latitud_decimal'] - lat_o
-df_comunas['dif_lon'] = df_comunas['longitud_decimal'] - lon_o
-
-def evaluar_trayectoria(row):
-    if row['comuna'] == comuna_origen: return True
+def evaluar_trayectoria_foco(row, foco):
+    if row['comuna'] == foco["comuna"]: return True
+    dif_lat = row['latitud_decimal'] - foco["lat"]
+    dif_lon = row['longitud_decimal'] - foco["lon"]
     # Holgura matemática que simula el frente de ráfagas real del Biobío
-    if dir_viento == "Norte" and row['dif_lat'] >= -0.15: return True
-    if dir_viento == "Sur" and row['dif_lat'] <= 0.15: return True
-    if dir_viento == "Este" and row['dif_lon'] >= -0.15: return True
-    if dir_viento == "Oeste" and row['dif_lon'] <= 0.15: return True
+    if dir_viento == "Norte" and dif_lat >= -0.15: return True
+    if dir_viento == "Sur" and dif_lat <= 0.15: return True
+    if dir_viento == "Este" and dif_lon >= -0.15: return True
+    if dir_viento == "Oeste" and dif_lon <= 0.15: return True
     if dir_viento == "Omnidireccional (Sin control)": return True
     return False
 
-df_comunas['En_Trayectoria'] = df_comunas.apply(evaluar_trayectoria, axis=1)
+def calcular_probabilidad_foco(row, foco):
+    if row['comuna'] == foco["comuna"]:
+        return 100.0, 0.0  # probabilidad, distancia
 
-def calcular_probabilidad_y_rango(row):
-    if row['comuna'] == comuna_origen:
-        return 100.0, "🔴 Alerta Roja (Extremo)"
-    
+    distancia_km = haversine(foco["lat"], foco["lon"], row['latitud_decimal'], row['longitud_decimal'])
+    en_trayectoria = evaluar_trayectoria_foco(row, foco)
+
     # Simulación dinámica sensible al entorno climático real
     factor_clima = (temperatura * 0.40) + (viento * 0.35) + (pendiente * 0.15) + ((100 - humedad) * 0.10)
-    
-    if row['En_Trayectoria']:
-        alcance_tolerancia = max(alcance_km, 35.0) # Umbral operativo base
-        if row['distancia_foco_km'] <= alcance_tolerancia:
-            prob = 100 - ((row['distancia_foco_km'] / alcance_tolerancia) * 100)
+
+    if en_trayectoria:
+        alcance_tolerancia = max(alcance_km, 35.0)  # Umbral operativo base
+        if distancia_km <= alcance_tolerancia:
+            prob = 100 - ((distancia_km / alcance_tolerancia) * 100)
             prob += (factor_clima * 0.25)
             prob = min(max(prob, 15.0), 99.0)
         else:
-            prob = max(20.0 - (row['distancia_foco_km'] * 0.1), 0.0)
+            prob = max(20.0 - (distancia_km * 0.1), 0.0)
     else:
-        # Afectación indirecta residual por cercanía radiactiva del frente
-        if row['distancia_foco_km'] <= 25.0:
-            prob = max(15.0 + (factor_clima * 0.1) - (row['distancia_foco_km'] * 0.5), 0.0)
+        if distancia_km <= 25.0:
+            prob = max(15.0 + (factor_clima * 0.1) - (distancia_km * 0.5), 0.0)
         else:
             prob = 0.0
 
-    if prob >= 75: return float(prob), "🔴 Alerta Roja (Extremo)"
-    elif prob >= 50: return float(prob), "🟠 Alerta Amarilla (Alto)"
-    elif prob >= 25: return float(prob), "🟡 Alerta Temprana Preventiva (Medio)"
-    else: return float(prob), "🟢 Alerta Verde (Bajo)"
+    return float(prob), float(distancia_km)
 
-resultados = df_comunas.apply(calcular_probabilidad_y_rango, axis=1)
-df_comunas['Probabilidad (%)'] = [round(r[0], 1) for r in resultados]
-df_comunas['Clasificacion_Riesgo'] = [r[1] for r in resultados]
+def evaluar_todos_los_focos(row):
+    """Evalúa la comuna contra TODOS los focos activos y se queda con el
+    peor escenario (mayor probabilidad) — el foco más amenazante manda."""
+    mejor_prob, mejor_dist, foco_responsable = -1.0, None, None
+    for foco in focos:
+        prob, dist = calcular_probabilidad_foco(row, foco)
+        if prob > mejor_prob:
+            mejor_prob, mejor_dist, foco_responsable = prob, dist, foco["comuna"]
+    return mejor_prob, mejor_dist, foco_responsable
+
+resultados_multi = df_comunas.apply(evaluar_todos_los_focos, axis=1)
+df_comunas['Probabilidad (%)'] = [round(r[0], 1) for r in resultados_multi]
+df_comunas['distancia_foco_km'] = [round(r[1], 2) for r in resultados_multi]
+df_comunas['Foco_Responsable'] = [r[2] for r in resultados_multi]
+
+def clasificar(prob):
+    if prob >= 75: return "🔴 Alerta Roja (Extremo)"
+    elif prob >= 50: return "🟠 Alerta Amarilla (Alto)"
+    elif prob >= 25: return "🟡 Alerta Temprana Preventiva (Medio)"
+    else: return "🟢 Alerta Verde (Bajo)"
+
+df_comunas['Clasificacion_Riesgo'] = df_comunas['Probabilidad (%)'].apply(clasificar)
 
 # ==============================================================================
 # 5. DISEÑO DE PESTAÑAS INTERACTIVAS
@@ -243,6 +282,15 @@ with tab_mapa:
 
     with col_mapa:
         st.subheader("🗺️ Mapeo de Threat Territorial y Vector de Viento")
+        # Zoom adaptativo: si los focos están muy dispersos, alejamos la vista para verlos todos
+        if len(focos) > 1:
+            spread_lat = max(f["lat"] for f in focos) - min(f["lat"] for f in focos)
+            spread_lon = max(f["lon"] for f in focos) - min(f["lon"] for f in focos)
+            dispersión = max(spread_lat, spread_lon)
+            zoom_mapa = 9.5 if dispersión < 0.1 else (8.3 if dispersión < 0.5 else (7.0 if dispersión < 1.2 else 6.0))
+        else:
+            zoom_mapa = 7.8
+
         fig_mapa = px.scatter_mapbox(
             df_comunas, lat="latitud_decimal", lon="longitud_decimal",
             color="Clasificacion_Riesgo", size="poblacion_2017",
@@ -253,10 +301,38 @@ with tab_mapa:
             category_orders={"Clasificacion_Riesgo": ["🔴 Alerta Roja (Extremo)", "🟠 Alerta Amarilla (Alto)", "🟡 Alerta Temprana Preventiva (Medio)", "🟢 Alerta Verde (Bajo)"]},
             hover_name="comuna",
             hover_data={"Clasificacion_Riesgo": True, "distancia_foco_km": ":.2f Km", "Probabilidad (%)": True},
-            zoom=7.8, center=dict(lat=lat_o, lon=lon_o),
+            zoom=zoom_mapa, center=dict(lat=lat_o, lon=lon_o),
             mapbox_style="open-street-map", height=500
         )
         fig_mapa.update_traces(hovertemplate="<b>%{hovertext}</b><br><br>Riesgo: %{customdata[0]}<br>Distancia: %{customdata[1]}<br>Probabilidad: %{customdata[2]}<br><b>Viento:</b> " + f"{viento} km/h hacia el {dir_viento}<br>")
+
+        # --- Marcadores de cada foco activo (★) ---
+        fig_mapa.add_trace(go.Scattermapbox(
+            lat=[f["lat"] for f in focos], lon=[f["lon"] for f in focos],
+            mode="markers+text",
+            marker=dict(size=16, color="black"),
+            text=[f["comuna"] for f in focos],
+            textposition="top right",
+            textfont=dict(size=12, color="black"),
+            name="Focos Activos",
+            hovertemplate="<b>🔥 Foco activo: %{text}</b><extra></extra>",
+        ))
+
+        # --- Cuadrícula UTM (zona 18S, EPSG:32718 - válida para Biobío) ---
+        if mostrar_grilla_utm:
+            margen = 0.6  # grados de margen alrededor de las comunas para que la grilla cubra todo el mapa
+            for traza_grilla in generar_trazas_cuadricula_utm(
+                lat_min=df_comunas['latitud_decimal'].min() - margen,
+                lat_max=df_comunas['latitud_decimal'].max() + margen,
+                lon_min=df_comunas['longitud_decimal'].min() - margen,
+                lon_max=df_comunas['longitud_decimal'].max() + margen,
+                paso_metros=paso_grilla_km * 1000,
+                mostrar_etiquetas=mostrar_etiquetas_utm,  # controlado por checkbox aparte
+                modo_etiqueta="distancia_foco" if usar_distancia_foco else "utm",
+                origenes=[(f["lat"], f["lon"]) for f in focos],
+            ):
+                fig_mapa.add_trace(traza_grilla)
+
         fig_mapa.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, legend=dict(title_text="Riesgo SENAPRED", y=0.99, x=0.01, bgcolor="rgba(255, 255, 255, 0.8)"))
         # El parámetro config restaura nativamente el scroll del ratón y zoom interactivo solicitado
         st.plotly_chart(fig_mapa, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True})
@@ -292,9 +368,12 @@ with tab_mapa:
         st.markdown("### 🏃‍♂️ Rutas de Evacuación y Refugios")
         comunas_peligrosas = df_comunas[df_comunas['Probabilidad (%)'] >= 50]
         if not comunas_peligrosas.empty:
-            for com in comunas_peligrosas['comuna'].unique():
+            for _, fila_peligro in comunas_peligrosas.drop_duplicates(subset=['comuna']).iterrows():
+                com = fila_peligro['comuna']
                 ruta_sugerida = "Eje Vial Ruta 160 Sur" if dir_viento == "Norte" else "Eje Vial Ruta 5 Sur / Autopista del Itata"
-                st.markdown(f"* **{com}:** Evacuar preventivamente vía **{ruta_sugerida}**.")
+                foco_resp = fila_peligro['Foco_Responsable']
+                etiqueta_foco = f" (amenazada por foco en **{foco_resp}**)" if len(focos) > 1 else ""
+                st.markdown(f"* **{com}**{etiqueta_foco}: Evacuar preventivamente vía **{ruta_sugerida}**.")
                 if com in albergues_biobio:
                     st.caption(f"🏠 **Albergue de Referencia:** {albergues_biobio[com]}")
         else: st.success("✓ Todos los caminos y conectividades se encuentran estables.")
@@ -349,7 +428,7 @@ with tab_datos:
     st.download_button(
         label="📥 Descargar resultado en formato CSV para Excel",
         data=csv_data,
-        file_name=f"simulacion_incendio_{comuna_origen}.csv",
+        file_name=f"simulacion_incendio_{'_'.join(comunas_origen)}.csv",
         mime="text/csv"
     )
 
