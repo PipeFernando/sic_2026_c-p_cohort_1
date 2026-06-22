@@ -1,0 +1,35 @@
+# Variables de entorno
+.env
+
+# Entornos virtuales
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Outputs generados
+outputs/*
+!outputs/.gitkeep
+
+# Testing / Linting
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
