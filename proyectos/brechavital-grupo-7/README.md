@@ -21,11 +21,23 @@ Puedes acceder y probar la aplicación directamente desde tu navegador sin insta
 ---
 
 ## 📊 Dataset y Origen de los Datos
-El conjunto de datos utilizado para este análisis contiene registros anónimos de diagnósticos médicos y las edades de los pacientes.
 
-* **Fuente:** Datos simulados / extraídos con propósitos educativos y analíticos basados en la estructura del sistema de salud chileno (Ajustar si proviene de MINSAL o plataforma de datos abiertos).
-* **Licencia:** El uso de este dataset es exclusivamente para fines académicos y de investigación. Licencia de uso libre (Open Data).
-* **Volumen:** El dataset contiene miles de registros procesados, garantizando representatividad en el análisis.
+**GES Classification Dataset** — [Kaggle](https://www.kaggle.com/datasets/raviiloveyou/classification-datasetges)
+
+In Chile, a patient needing a specialty consultation or surgery has to first be referred by a general practitioner, then placed on a waiting list. The Explicit Health Guarantees (GES in Spanish) ensure, by law, the maximum time to solve an important set of health problems. Usually, a health professional manually verifies if each referral, written in natural language, corresponds or not to a GES-covered disease. An error in this classification is catastrophic for patients, as it puts them on a non-prioritized waiting list, characterized by prolonged waiting times.
+
+The dataset contains **~883 samples** with **3 features** (id, diagnostic, age) and **1 class label** (ges: True/False). The task is to develop a model that can linearly separate between the two classes.
+
+* **Volumen:** 883 registros, 260 GES (27.6%), 681 No GES (72.4%)
+* **Fuente:** Kaggle — [classification-datasetges](https://www.kaggle.com/datasets/raviiloveyou/classification-datasetges)
+
+---
+
+## 🎯 Hipótesis
+
+**¿Puede un modelo basado en inteligencia artificial identificar correctamente los casos GES utilizando el diagnóstico y la edad del paciente?**
+
+Creemos que sí. Dado que las enfermedades GES están definidas por ley para un conjunto específico de patologías y rangos etarios, un modelo de clasificación entrenado con datos históricos debería ser capaz de aprender estos patrones y predecir con alta precisión si un caso corresponde o no a GES, basándose únicamente en el diagnóstico (texto) y la edad del paciente.
 
 ---
 
@@ -52,7 +64,13 @@ Si deseas ejecutar este proyecto en tu propia máquina, sigue estos pasos:
    pip install -r requirements.txt
    ```
 
-4. **Ejecutar la aplicación Streamlit:**
+4. **Configurar el Asistente de IA (Opcional pero recomendado):**
+   Para habilitar la pestaña del Asistente de Inteligencia Artificial (Llama-3), debes configurar tu token gratuito de HuggingFace.
+   - Crea una copia del archivo `.env.example` y renómbralo a `.env`.
+   - Abre `.env` y pega tu token: `HF_TOKEN=hf_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`.
+   *(Si omites este paso, el dashboard funcionará perfectamente, pero la pestaña de la IA estará desactivada).*
+
+5. **Ejecutar la aplicación Streamlit:**
    ```bash
    streamlit run app.py
    ```
