@@ -13,6 +13,7 @@
 # - Texto explicativo del hallazgo principal en lenguaje no técnico.
 
 import os
+from pathlib import Path
 from typing import List
 
 import numpy as np
@@ -73,87 +74,158 @@ def nombre_legible(valor: object, diccionario: dict) -> str:
 # -------------------------------------------------------------------
 # 3. Carga de datos
 # -------------------------------------------------------------------
-@st.cache_data(show_spinner="Cargando dataset procesado...")
-def cargar_datos() -> pd.DataFrame:
+@st.cache_data
+def cargar_datos():
     """
-    Carga el dataset procesado.
+    Carga el dataset procesado usando rutas robustas.
 
-    Decisión técnica:
-    - Se revisan dos rutas posibles para que el archivo funcione tanto
-      en local como en Streamlit Cloud.
-    - La ruta esperada para la entrega es data/dataset_procesado.csv.
+    Esta función permite que la app funcione tanto localmente como en Streamlit Cloud.
+    El problema habitual es que localmente ejecutamos Streamlit desde proyectos/Equipo_8,
+    pero Streamlit Cloud puede ejecutar desde la raíz del repositorio.
     """
-    rutas_posibles: List[str] = [
-        "data/dataset_procesado.csv",
-        "dataset_procesado.csv",
+
+    base_dir = Path(__file__).resolve().parent
+    cwd = Path.cwd()
+
+    rutas_posibles = [
+        base_dir / "data" / "dataset_procesado.csv",
+        base_dir / "data" / "dataset_procesado_streamlit.csv",
+        base_dir / "dataset_procesado.csv",
+        cwd / "proyectos" / "Equipo_8" / "data" / "dataset_procesado.csv",
+        cwd / "proyectos" / "Equipo_8" / "data" / "dataset_procesado_streamlit.csv",
+        cwd / "data" / "dataset_procesado.csv",
+        cwd / "dataset_procesado.csv",
     ]
 
-    ruta_encontrada = None
     for ruta in rutas_posibles:
-        if os.path.exists(ruta):
-            ruta_encontrada = ruta
-            break
+        if ruta.exists():
+            return pd.read_csv(ruta)
 
-    if ruta_encontrada is None:
-        st.error(
-            "No se encontró el archivo dataset_procesado.csv. "
-            "Ubícalo en data/dataset_procesado.csv o en la misma carpeta de app.py."
-        )
-        st.stop()
+    st.error("No se encontró el dataset procesado. Esta es la versión corregida de carga robusta.")
 
-    df = pd.read_csv(ruta_encontrada)
+    st.write("Carpeta actual de ejecución:")
+    st.code(str(cwd))
 
-    # Normalización mínima para evitar errores si existen valores nulos.
-    columnas_texto = [
-        "text",
-        "texto_limpio",
-        "sentimiento",
-        "intensidad_sentimiento",
-        "detonante_frustracion",
-        "escenario_sugerido",
-        "prioridad_entrenamiento",
-        "empresa_contactada",
-        "dia_semana",
-    ]
+    st.write("Carpeta donde está app.py:")
+    st.code(str(base_dir))
 
-    for col in columnas_texto:
-        if col in df.columns:
-            df[col] = df[col].fillna("Sin dato").astype(str)
+    st.write("Rutas revisadas:")
+    for ruta in rutas_posibles:
+        st.code(str(ruta))
 
-    # La fecha se convierte a datetime para permitir filtros por rango
-    # y análisis temporal.
-    if "fecha" in df.columns:
-        df["fecha_dt"] = pd.to_datetime(df["fecha"], errors="coerce")
-    elif "created_at" in df.columns:
-        df["fecha_dt"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True).dt.tz_localize(None)
+    data_dir = base_dir / "data"
+
+    st.write("Archivos detectados en la carpeta data junto a app.py:")
+
+    if data_dir.exists():
+        archivos = [archivo.name for archivo in data_dir.iterdir()]
+        st.write(archivos)
     else:
-        df["fecha_dt"] = pd.NaT
+        st.warning("No existe carpeta data junto a app.py.")
 
-    # Columnas auxiliares para visualización.
-    df["mes"] = df["fecha_dt"].dt.to_period("M").astype(str)
-    df.loc[df["mes"] == "NaT", "mes"] = "Sin fecha"
+    st.stop()
 
-    if "detonante_frustracion" in df.columns:
-        df["detonante_legible"] = df["detonante_frustracion"].apply(
-            lambda x: nombre_legible(x, LABELS_DETONANTES)
-        )
-
-    if "sentimiento" in df.columns:
-        df["sentimiento_legible"] = df["sentimiento"].apply(
-            lambda x: nombre_legible(x, LABELS_SENTIMIENTO)
-        )
-
-    if "prioridad_entrenamiento" in df.columns:
-        df["prioridad_legible"] = df["prioridad_entrenamiento"].apply(
-            lambda x: nombre_legible(x, LABELS_PRIORIDAD)
-        )
-
-    return df
-
-
+# ------------------------------------------------------------
+# Carga principal del dataset
+# ------------------------------------------------------------
+# Esta línea ejecuta la función cargar_datos() y guarda el CSV
+# como un DataFrame llamado df.
 df = cargar_datos()
 
+# ------------------------------------------------------------
+# Creación segura de la columna fecha_dt
+# ------------------------------------------------------------
+# El dashboard usa fecha_dt para el filtro temporal.
+# Si el CSV no trae esa columna, intentamos crearla desde otras columnas posibles.
+if "fecha_dt" not in df.columns:
+    columnas_fecha_posibles = [
+        "created_at",
+        "fecha",
+        "date",
+        "timestamp",
+        "tweet_created_at"
+    ]
 
+    columna_fecha_detectada = None
+
+    for columna in columnas_fecha_posibles:
+        if columna in df.columns:
+            columna_fecha_detectada = columna
+            break
+
+    if columna_fecha_detectada is not None:
+        df["fecha_dt"] = pd.to_datetime(df[columna_fecha_detectada], errors="coerce")
+    else:
+        df["fecha_dt"] = pd.NaT
+else:
+    df["fecha_dt"] = pd.to_datetime(df["fecha_dt"], errors="coerce")
+
+# ------------------------------------------------------------
+# Creación segura de la columna mes
+# ------------------------------------------------------------
+# Esta columna se usa para construir el gráfico de evolución temporal.
+# Si fecha_dt tiene una fecha válida, extraemos el año y mes.
+# Si no tiene fecha, dejamos el valor como "Sin fecha".
+
+df["mes"] = np.where(
+    df["fecha_dt"].notna(),
+    df["fecha_dt"].dt.strftime("%Y-%m"),
+    "Sin fecha"
+)
+# ------------------------------------------------------------
+# Creación segura de columnas legibles para el dashboard
+# ------------------------------------------------------------
+# Estas columnas se usan para mostrar nombres más claros en filtros y gráficos.
+# Si el CSV no las trae, las creamos a partir de las columnas procesadas.
+
+if "sentimiento_legible" not in df.columns:
+    if "sentimiento" in df.columns:
+        df["sentimiento_legible"] = (
+            df["sentimiento"]
+            .astype(str)
+            .str.lower()
+            .map({
+                "negativo": "Negativo",
+                "negative": "Negativo",
+                "neutral": "Neutral",
+                "positivo": "Positivo",
+                "positive": "Positivo"
+            })
+            .fillna(df["sentimiento"].astype(str).str.capitalize())
+        )
+    else:
+        df["sentimiento_legible"] = "No clasificado"
+
+
+if "detonante_legible" not in df.columns:
+    if "detonante_frustracion" in df.columns:
+        df["detonante_legible"] = (
+            df["detonante_frustracion"]
+            .astype(str)
+            .str.replace("_", " ", regex=False)
+            .str.capitalize()
+        )
+    else:
+        df["detonante_legible"] = "No clasificado"
+
+
+if "prioridad_legible" not in df.columns:
+    if "prioridad_entrenamiento" in df.columns:
+        df["prioridad_legible"] = (
+            df["prioridad_entrenamiento"]
+            .astype(str)
+            .str.replace("_", " ", regex=False)
+            .str.capitalize()
+        )
+    elif "prioridad" in df.columns:
+        df["prioridad_legible"] = (
+            df["prioridad"]
+            .astype(str)
+            .str.replace("_", " ", regex=False)
+            .str.capitalize()
+        )
+    else:
+        df["prioridad_legible"] = "No clasificado"
 # -------------------------------------------------------------------
 # 4. Estilos visuales
 # -------------------------------------------------------------------
