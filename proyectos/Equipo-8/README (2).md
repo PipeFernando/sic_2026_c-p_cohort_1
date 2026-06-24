@@ -25,6 +25,8 @@ El análisis revela que la demora en los tiempos de respuesta y los fallos técn
 ---
 
 ## 📊 Dataset
+Share Streamlit link: https://frustacionclientes.streamlit.app/
+
 El proyecto utiliza datos reales de interacciones de soporte técnico en redes sociales.
 * **Fuente:** [Dataset Original (TWCS)](https://drive.google.com/file/d/1BggtUCIAJ_RsZH158DiDgwqvJOjjiLBD/view?usp=drive_link)
 * **Dataset Procesado:** [Dataset Limpio](https://drive.google.com/file/d/10y0VsKfzGMUftdRZr4KDelaeWS9hDhDb/view?usp=drive_link)
